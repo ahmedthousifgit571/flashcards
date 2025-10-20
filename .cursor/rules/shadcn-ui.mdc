@@ -1,0 +1,21 @@
+---
+alwaysApply: true
+---
+# UI Library: shadcn/ui
+
+This project uses shadcn/ui for all UI components.
+
+- If shadcn/ui is not initialized in the project, initialize it:
+
+```bash
+npx shadcn@latest init
+```
+
+- To add a specific component, use the add command (example for Button):
+
+```bash
+npx shadcn@latest add button
+```
+
+Replace `button` with any other component name as needed.
+

@@ -1,0 +1,212 @@
+---
+alwaysApply: true
+description: Clerk authentication and data access control rules
+---
+
+# Authentication & Data Access Control - Clerk
+
+This project uses Clerk for authentication. All data access must be properly secured to ensure users can only access their own data.
+
+## Authentication Rules
+
+### 1. Always Check Authentication
+- Every API route and server action must verify user authentication
+- Use `auth()` from `@clerk/nextjs` to get current user
+- Redirect unauthenticated users or return appropriate error responses
+
+```ts
+import { auth } from '@clerk/nextjs';
+
+export async function GET() {
+  const { userId } = auth();
+  
+  if (!userId) {
+    return new Response('Unauthorized', { status: 401 });
+  }
+  
+  // Proceed with authenticated logic
+}
+```
+
+### 2. User ID Validation
+- Always use `userId` from Clerk's `auth()` function
+- Never trust client-side user IDs
+- Validate that the authenticated user matches the requested resource owner
+
+```ts
+import { auth } from '@clerk/nextjs';
+import { eq } from 'drizzle-orm';
+import { flashcards } from '@/src/db/schema';
+
+export async function getUserFlashcards(db: any, requestedUserId: string) {
+  const { userId } = auth();
+  
+  // Ensure user can only access their own data
+  if (!userId || userId !== requestedUserId) {
+    throw new Error('Unauthorized access');
+  }
+  
+  return await db.select().from(flashcards).where(eq(flashcards.userId, userId));
+}
+```
+
+## Data Access Patterns
+
+### 3. Database Queries Must Include User Filtering
+- All database queries must filter by the authenticated user's ID
+- Never query data without user-specific filtering
+- Use Drizzle ORM with proper where clauses
+
+```ts
+// ✅ Correct - Always filter by userId
+import { eq } from 'drizzle-orm';
+import { flashcards } from '@/src/db/schema';
+
+async function getUserFlashcards(db: any) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  return await db
+    .select()
+    .from(flashcards)
+    .where(eq(flashcards.userId, userId));
+}
+
+// ❌ Incorrect - No user filtering
+async function getAllFlashcards(db: any) {
+  return await db.select().from(flashcards); // Security risk!
+}
+```
+
+### 4. Resource Ownership Validation
+- Before updating/deleting resources, verify ownership
+- Check that the resource belongs to the authenticated user
+- Return 403 Forbidden for unauthorized access attempts
+
+```ts
+async function updateFlashcard(db: any, flashcardId: string, data: any) {
+  const { userId } = auth();
+  if (!userId) throw new Error('Unauthorized');
+  
+  // First verify ownership
+  const flashcard = await db
+    .select()
+    .from(flashcards)
+    .where(eq(flashcards.id, flashcardId))
+    .limit(1);
+    
+  if (!flashcard.length || flashcard[0].userId !== userId) {
+    throw new Error('Forbidden - Resource does not belong to user');
+  }
+  
+  // Proceed with update
+  return await db
+    .update(flashcards)
+    .set(data)
+    .where(eq(flashcards.id, flashcardId))
+    .returning();
+}
+```
+
+## API Route Security
+
+### 5. Route Protection
+- Use middleware to protect routes when possible
+- Implement authentication checks in all API endpoints
+- Return consistent error responses for unauthorized access
+
+```ts
+// middleware.ts
+import { authMiddleware } from '@clerk/nextjs';
+
+export default authMiddleware({
+  publicRoutes: ['/'],
+  ignoredRoutes: ['/api/webhooks/(.*)'],
+});
+
+export const config = {
+  matcher: ['/((?!.+\\.[\\w]+$|_next).*)', '/', '/(api|trpc)(.*)'],
+};
+```
+
+### 6. Error Handling
+- Return appropriate HTTP status codes
+- Don't expose sensitive information in error messages
+- Log security violations for monitoring
+
+```ts
+export async function DELETE(request: Request) {
+  try {
+    const { userId } = auth();
+    if (!userId) {
+      return new Response('Unauthorized', { status: 401 });
+    }
+    
+    // Your secure logic here
+    
+  } catch (error) {
+    console.error('Security violation:', error);
+    return new Response('Forbidden', { status: 403 });
+  }
+}
+```
+
+## Client-Side Considerations
+
+### 7. Frontend Security
+- Never expose sensitive data in client-side code
+- Use Clerk's `useUser()` hook for user information
+- Implement proper loading states for authentication
+
+```tsx
+import { useUser } from '@clerk/nextjs';
+
+function UserProfile() {
+  const { user, isLoaded } = useUser();
+  
+  if (!isLoaded) return <div>Loading...</div>;
+  if (!user) return <div>Please sign in</div>;
+  
+  return <div>Welcome, {user.firstName}!</div>;
+}
+```
+
+## Database Schema Requirements
+
+### 8. User Association
+- All user-specific tables must include a `userId` column
+- Use foreign key constraints where appropriate
+- Index user-specific columns for performance
+
+```ts
+// Example schema with proper user association
+export const flashcards = pgTable('flashcards', {
+  id: uuid('id').defaultRandom().primaryKey(),
+  userId: text('user_id').notNull(), // Always required
+  question: text('question').notNull(),
+  answer: text('answer').notNull(),
+  createdAt: timestamp('created_at').defaultNow(),
+});
+
+// Add index for efficient user-based queries
+export const flashcardsUserIdIdx = index('flashcards_user_id_idx').on(flashcards.userId);
+```
+
+## Security Checklist
+
+Before deploying any feature:
+- [ ] Authentication is verified in all API routes
+- [ ] User ID is validated from Clerk auth context
+- [ ] Database queries filter by authenticated user
+- [ ] Resource ownership is verified before updates/deletes
+- [ ] Error responses don't expose sensitive information
+- [ ] Client-side code doesn't handle sensitive operations
+- [ ] Database schema includes proper user associations
+
+## Important Notes
+
+- **Never trust client-side data** - Always validate server-side
+- **Use Clerk's built-in security features** - Don't implement custom auth
+- **Follow the principle of least privilege** - Users should only access their own data
+- **Test authorization thoroughly** - Verify users cannot access other users' data
+- **Monitor for security violations** - Log and alert on unauthorized access attempts

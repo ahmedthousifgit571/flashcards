@@ -1,0 +1,43 @@
+---
+alwaysApply: true
+description: Enforce that all database interactions use Drizzle ORM with the project's schema
+---
+
+# Database Interaction Rule — Use Drizzle Schema and Queries
+
+- All database access must use Drizzle ORM and the project's schema definitions.
+- Do NOT use raw SQL strings, direct driver calls, or ad-hoc query builders.
+- Import tables and types exclusively from the project's schema and build queries via Drizzle APIs.
+
+Relevant files:
+- Schema: [src/db/schema.ts](mdc:src/db/schema.ts)
+- Drizzle config: [drizzle.config.ts](mdc:drizzle.config.ts)
+
+## Allowed (Drizzle with schema)
+```ts
+import { eq } from 'drizzle-orm';
+import { users } from '@/src/db/schema';
+// obtain your Drizzle db instance as per your app's setup
+
+async function getUserById(db: any, userId: string) {
+  return await db.select().from(users).where(eq(users.id, userId));
+}
+
+async function createUser(db: any, data: { id: string; email: string }) {
+  return await db.insert(users).values(data).returning();
+}
+```
+
+## Disallowed (raw SQL or direct drivers)
+```ts
+// ❌ Raw SQL strings
+await db.execute(`SELECT * FROM users WHERE id = '${userId}'`);
+
+// ❌ Driver-specific clients without Drizzle
+const result = await client.query('INSERT INTO users ...');
+```
+
+## Notes
+- Prefer typed imports from the schema for column/table names and types.
+- If the schema needs to evolve, update [src/db/schema.ts](mdc:src/db/schema.ts) and corresponding migrations, then refactor queries to use the updated schema.
+
